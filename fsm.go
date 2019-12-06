@@ -37,22 +37,27 @@ func (fsm *fsm) Apply(logEntry *raft.Log) interface{} {
 		// fsm.stateValue = e.Value
 		// storeValue(fsm.stateValue, e.Value) //Todo
 		// Start a writable transaction.
-		txn := fsm.db.NewTransaction(true)
-		defer txn.Discard()
 
 		// Use the transaction...
 		for k := range e.Value {
 			val, _ := json.Marshal(e.Value[k])
+			fmt.Println(".....Saving key", k, "with val: ", string(val), "..........")
+			txn := fsm.db.NewTransaction(true)
+			defer txn.Discard()
 			err := txn.Set([]byte(k), val)
 			if err != nil {
 				return err
 			}
+			// Commit the transaction and check for error.
+			if err := txn.Commit(); err != nil {
+				fmt.Println(".......Error: ", err, "........")
+				return err
+			}
+			fmt.Println("Done")
 		}
+		fmt.Println("Value set")
 
-		// Commit the transaction and check for error.
-		if err := txn.Commit(); err != nil {
-			return err
-		}
+		fmt.Println("Value commited")
 
 		return nil
 	default:

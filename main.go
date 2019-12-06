@@ -101,7 +101,7 @@ func NewNode(config *Config, log *zerolog.Logger) (*node, error) {
 		fmt.Println("Error in db creation")
 		panic(err)
 	}
-	defer database.Close()
+	// defer database.Close()
 	// var mut sync.Mutex
 	fsm := &fsm{
 		db: database,
