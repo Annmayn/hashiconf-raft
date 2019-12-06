@@ -2,11 +2,13 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"strings"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"github.com/hashicorp/raft"
 	"github.com/justinas/alice"
 	"github.com/rs/zerolog"
@@ -66,9 +68,11 @@ func (server *httpServer) handleRequest(w http.ResponseWriter, r *http.Request) 
 }
 
 func (server *httpServer) handleKeyPost(w http.ResponseWriter, r *http.Request) {
-	request := struct {
-		NewValue int `json:"newValue"`
-	}{}
+	// request := struct {
+	// 	NewValue int `json:"newValue"`
+	// }{}
+
+	request := make(map[string]interface{})
 
 	defer r.Body.Close()
 	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
@@ -79,7 +83,7 @@ func (server *httpServer) handleKeyPost(w http.ResponseWriter, r *http.Request) 
 
 	event := &event{
 		Type:  "set",
-		Value: request.NewValue,
+		Value: request,
 	}
 
 	eventBytes, err := json.Marshal(event)
@@ -87,6 +91,7 @@ func (server *httpServer) handleKeyPost(w http.ResponseWriter, r *http.Request) 
 		server.logger.Error().Err(err).Msg("")
 	}
 
+	//application of raft algorithm for replication
 	applyFuture := server.node.raftNode.Apply(eventBytes, 5*time.Second)
 	if err := applyFuture.Error(); err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -96,13 +101,39 @@ func (server *httpServer) handleKeyPost(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 }
 
+//access value from db
+func getValue(db *badger.DB, key string) string {
+	var valcopy []byte
+	err := db.View(func(txn *badger.Txn) error {
+		item, err := txn.Get([]byte(key))
+		if err != nil {
+			return errors.New("Read None")
+		}
+		e := item.Value(func(val []byte) error {
+			// Copying or parsing val is valid.
+			valcopy = append([]byte{}, val...)
+			return nil
+		})
+		if e != nil {
+			return errors.New("Error None")
+		}
+		return nil
+	})
+	if err != nil {
+		return err.Error()
+	}
+	return string(valcopy)
+}
+
 func (server *httpServer) handleKeyGet(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 
 	response := struct {
-		Value int `json:"value"`
+		Value string `json:"value"`
 	}{
-		Value: server.node.fsm.stateValue,
+		//update: get value from database
+		// Value: server.node.fsm.stateValue,
+		Value: getValue(server.node.fsm.db, "answer"),
 	}
 
 	responseBytes, err := json.Marshal(response)

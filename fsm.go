@@ -6,17 +6,20 @@ import (
 	"io"
 	"sync"
 
+	"github.com/dgraph-io/badger"
 	"github.com/hashicorp/raft"
 )
 
 type fsm struct {
-	mutex      sync.Mutex
-	stateValue int
+	mutex sync.Mutex
+	//update: badgerdb instance
+	// stateValue int
+	db *badger.DB
 }
 
 type event struct {
 	Type  string
-	Value int
+	Value map[string]interface{}
 }
 
 // Apply applies a Raft log entry to the key-value store.
@@ -30,7 +33,26 @@ func (fsm *fsm) Apply(logEntry *raft.Log) interface{} {
 	case "set":
 		fsm.mutex.Lock()
 		defer fsm.mutex.Unlock()
-		fsm.stateValue = e.Value
+		//update: store value in badgerdb
+		// fsm.stateValue = e.Value
+		// storeValue(fsm.stateValue, e.Value) //Todo
+		// Start a writable transaction.
+		txn := fsm.db.NewTransaction(true)
+		defer txn.Discard()
+
+		// Use the transaction...
+		for k := range e.Value {
+			val, _ := json.Marshal(e.Value[k])
+			err := txn.Set([]byte(k), val)
+			if err != nil {
+				return err
+			}
+		}
+
+		// Commit the transaction and check for error.
+		if err := txn.Commit(); err != nil {
+			return err
+		}
 
 		return nil
 	default:
@@ -42,7 +64,7 @@ func (fsm *fsm) Snapshot() (raft.FSMSnapshot, error) {
 	fsm.mutex.Lock()
 	defer fsm.mutex.Unlock()
 
-	return &fsmSnapshot{stateValue: fsm.stateValue}, nil
+	return &fsmSnapshot{stateValue: -1}, nil
 }
 
 // Restore stores the key-value store to a previous state.
@@ -52,6 +74,7 @@ func (fsm *fsm) Restore(serialized io.ReadCloser) error {
 		return err
 	}
 
-	fsm.stateValue = snapshot.stateValue
+	// fsm.stateValue = snapshot.stateValue
+	//todo : restore database
 	return nil
 }

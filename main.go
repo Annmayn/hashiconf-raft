@@ -11,8 +11,9 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/dgraph-io/badger"
 	"github.com/hashicorp/raft"
-	"github.com/hashicorp/raft-boltdb"
+	raftboltdb "github.com/hashicorp/raft-boltdb"
 	"github.com/rs/zerolog"
 )
 
@@ -27,7 +28,9 @@ func main() {
 	}
 
 	nodeLogger := logger.With().Str("component", "node").Logger()
+	fmt.Println("\n.........Here.........\n")
 	node, err := NewNode(config, &nodeLogger)
+	fmt.Println("\n.........Done.........\n")
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error configuring node: %s", err)
 		os.Exit(1)
@@ -90,13 +93,25 @@ type node struct {
 }
 
 func NewNode(config *Config, log *zerolog.Logger) (*node, error) {
-	fsm := &fsm{
-		stateValue: 0,
+	dirOffset := fmt.Sprintf("%v", time.Now().Unix())
+	fmt.Println("Dir: ", dirOffset)
+	database, err := badger.Open(badger.DefaultOptions("/tmp/badger" + dirOffset))
+	fmt.Println("\n\n......OPENED..........\n\n")
+	if err != nil {
+		fmt.Println("Error in db creation")
+		panic(err)
 	}
+	defer database.Close()
+	// var mut sync.Mutex
+	fsm := &fsm{
+		db: database,
+	}
+	fmt.Println("\n\n......FSM CREATED..........\n\n")
 
 	if err := os.MkdirAll(config.DataDir, 0700); err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......DIRECTORY OPENED..........\n\n")
 
 	raftConfig := raft.DefaultConfig()
 	raftConfig.LocalID = raft.ServerID(config.RaftAddress.String())
@@ -106,28 +121,35 @@ func NewNode(config *Config, log *zerolog.Logger) (*node, error) {
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......1..........\n\n")
 
 	snapshotStoreLogger := log.With().Str("component", "raft-snapshots").Logger()
-	snapshotStore, err := raft.NewFileSnapshotStore(config.DataDir, 1, snapshotStoreLogger)
+	snapshotStore, err := raft.NewFileSnapshotStore(config.DataDir+dirOffset, 1, snapshotStoreLogger)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......2..........\n\n")
 
-	logStore, err := raftboltdb.NewBoltStore(filepath.Join(config.DataDir, "raft-log.bolt"))
+	logStore, err := raftboltdb.NewBoltStore(filepath.Join(config.DataDir+dirOffset, "raft-log.bolt"))
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......3..........\n\n")
 
-	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(config.DataDir, "raft-stable.bolt"))
+	stableStore, err := raftboltdb.NewBoltStore(filepath.Join(config.DataDir+dirOffset, "raft-stable.bolt"))
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......4..........\n\n")
+
 	raftNode, err := raft.NewRaft(raftConfig, fsm, logStore, stableStore,
 		snapshotStore, transport)
 	if err != nil {
 		return nil, err
 	}
+	fmt.Println("\n\n......5..........\n\n")
 	if config.Bootstrap {
+		fmt.Println("\n\n......5.1..........\n\n")
 		configuration := raft.Configuration{
 			Servers: []raft.Server{
 				{
@@ -138,6 +160,7 @@ func NewNode(config *Config, log *zerolog.Logger) (*node, error) {
 		}
 		raftNode.BootstrapCluster(configuration)
 	}
+	fmt.Println("\n\n......6..........\n\n")
 	return &node{
 		config:   config,
 		raftNode: raftNode,
